@@ -1,0 +1,47 @@
+ARBOL DE DECISION (criterio: entropy)
+============================================================
+odor == 'n' ?
+ Si:
+   spore-print-color == 'r' ?
+    Si:
+      --> Venenoso
+    No:
+      stalk-surface-below-ring == 'y' ?
+       Si:
+         gill-size == 'b' ?
+          Si:
+            --> Comestible
+          No:
+            --> Venenoso
+       No:
+         cap-surface == 'g' ?
+          Si:
+            --> Venenoso
+          No:
+            gill-size == 'n' ?
+             Si:
+               bruises == 't' ?
+                Si:
+                  --> Venenoso
+                No:
+                  --> Comestible
+             No:
+               --> Comestible
+ No:
+   bruises == 'f' ?
+    Si:
+      --> Venenoso
+    No:
+      stalk-root == 'c' ?
+       Si:
+         --> Comestible
+       No:
+         stalk-root == 'r' ?
+          Si:
+            --> Comestible
+          No:
+            gill-spacing == 'c' ?
+             Si:
+               --> Venenoso
+             No:
+               --> Comestible

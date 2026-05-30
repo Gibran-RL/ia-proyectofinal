@@ -1,66 +1,56 @@
-PROYECTO FINAL: CLASIFICACIÓN DE HONGOS
+PROYECTO FINAL: CLASIFICACION DE HONGOS
 ================================================================================
 
-ANÁLISIS CUALITATIVO DEL PROYECTO:
+ANALISIS CUALITATIVO
 
-1. MEJOR MODELO: Árbol de Decisión
-   ────────────────────────────────────────────────────────────────────────────
-   El modelo Árbol de Decisión obtuvo mejor desempeño:
-   • F1-Score: 1.0000 (Random Forest) vs 1.0000 (Árbol)
-   • Diferencia: 0.0000
+1. DESEMPENO GENERAL
+   --------------------------------------------------------------------------
+   Arbol de decision   -> Accuracy 1.0000 | F1 1.0000
+   Regresion logistica -> Accuracy 1.0000 | F1 1.0000
 
-   Random Forest generalmente supera al Árbol de Decisión porque:
-   - El ensemble reduce overfitting
-   - Captura mejor las relaciones complejas entre features
-   - Mayor robustez en generalización a datos nuevos
+   Ambos modelos obtienen practicamente el mismo desempeno. Esto era esperable: el conjunto de hongos es casi perfectamente
+   separable a partir de los rasgos categoricos, por lo que dos modelos de
+   naturaleza muy distinta llegan ambos a una exactitud muy alta. La conclusion
+   relevante NO es "cual gana por unas decimas", sino que el problema es
+   linealmente/estructuralmente facil y que el verdadero contraste esta en la
+   INTERPRETABILIDAD.
 
-2. FEATURES MÁS IMPORTANTES:
-   ────────────────────────────────────────────────────────────────────────────
-   Las features más relevantes para clasificar hongos son:
+2. QUE APRENDIO CADA MODELO
+   --------------------------------------------------------------------------
+   - El arbol de decision toma como primera regla el rasgo 'odor', lo que
+     indica que por si solo separa gran parte de las clases. El arbol completo
+     (outputs/arbol_decision.txt) es una lista de reglas '¿rasgo == valor?'
+     directamente legible.
+   - La regresion logistica coincide en lo esencial: las categorias con mayor
+     peso positivo hacia 'venenoso' son spore-print-color_r, odor_f, odor_c. Sus pesos theta dan una
+     lectura cuantitativa de cuanto contribuye cada categoria.
 
-   RANDOM FOREST (Top 3):
-   • odor: 0.1932
-   • gill-size: 0.1210
-   • spore-print-color: 0.1106
+3. INTERPRETACION DE LAS METRICAS (clase positiva = Venenoso)
+   --------------------------------------------------------------------------
+   En este dominio el RECALL de la clase 'venenoso' es la metrica critica: un
+   falso negativo (clasificar como comestible un hongo venenoso) es el error
+   peligroso. Conviene leer la matriz de confusion priorizando esa celda por
+   encima de la exactitud global.
 
-   Estas características capturan las diferencias fundamentales entre
-   hongos venenosos y comestibles en el dataset.
+4. LIMITACIONES
+   --------------------------------------------------------------------------
+   - El dataset solo tiene rasgos categoricos; no hay medidas continuas (tamano,
+     peso) que podrian ser necesarias en casos mas dificiles.
+   - La alta separabilidad hace que las metricas sean optimistas; en un problema
+     mas ruidoso la diferencia entre modelos seria mayor.
+   - El arbol implementado crece hasta separar por completo (sin poda ni
+     profundidad maxima), por lo que con datos ruidosos tenderia al sobreajuste.
+   - La regresion logistica usa gradiente descendiente basico; sobre datos
+     separables los pesos crecen sin cota teorica (aqui se controla con un numero
+     fijo de iteraciones).
+   - Se uso una particion fija con validacion estratificada; una validacion
+     cruzada k-fold daria una estimacion mas robusta.
 
-3. LIMITACIONES DEL ENFOQUE:
-   ────────────────────────────────────────────────────────────────────────────
-   • El dataset contiene solo características categóricas. No hay información
-     numérica sobre tamaño, peso u otras medidas continuas que podrían mejorar
-     la clasificación.
-
-   • La mayoría de muestras son de ciertas especies. El desbalance de clases
-     (si existe) puede favorecer la clase mayoritaria.
-
-   • Los modelos basados en árboles pueden no capturar interacciones
-     complejas entre features que requieren capas de redes neuronales.
-
-   • No se consideraron técnicas de validación cruzada más robustas
-     (k-fold cross-validation) aunque sí se usó validación estratificada.
-
-4. MÉTRICAS FINALES EN TEST:
-   ────────────────────────────────────────────────────────────────────────────
-   Random Forest:
-   • Accuracy:  1.0000 (100.00%)
-   • Precision: 1.0000 (pocos falsos positivos)
-   • Recall:    1.0000 (captura bien la clase mayoritaria)
-   • F1-Score:  1.0000
-
-   Árbol de Decisión:
-   • Accuracy:  1.0000 (100.00%)
-   • Precision: 1.0000
-   • Recall:    1.0000
-   • F1-Score:  1.0000
-
-5. RECOMENDACIONES:
-   ────────────────────────────────────────────────────────────────────────────
-   ✓ Usar Random Forest como modelo en producción para clasificar nuevos hongos
-   ✓ Considerar técnicas de data augmentation para mejorar el recall
-   ✓ Recolectar más datos de hongos venenosos si es posible
-   ✓ Explorar técnicas de ensemble más avanzadas (Gradient Boosting, XGBoost)
-   ✓ Implementar validación cruzada k-fold para evaluación más robusta
-
-================================================================================
+5. RECOMENDACIONES
+   --------------------------------------------------------------------------
+   - Para clasificar nuevos hongos basta cualquiera de los dos modelos; se
+     preferiria el arbol si se necesita explicar la decision con reglas, y la
+     regresion logistica si se quiere una probabilidad calibrada.
+   - Ante un costo asimetrico (es peor liberar un venenoso), subir el umbral de
+     decision de la regresion logistica para favorecer el recall de 'venenoso'.
+   - Validar con k-fold y, de ser posible, con datos de otras regiones.
