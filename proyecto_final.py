@@ -1,593 +1,634 @@
 """
-PROYECTO FINAL: CLASIFICACIÓN DE HONGOS (VENENOSOS vs COMESTIBLES)
-Facultad de Ciencias, UNAM - Aprendizaje de Máquina
+================================================================================
+PROYECTO FINAL: CLASIFICACION DE HONGOS (VENENOSOS vs COMESTIBLES)
+Facultad de Ciencias, UNAM - Aprendizaje de Maquina
+================================================================================
+
+Modelos implementados DESDE CERO siguiendo el material del curso:
+  - Arbol de decision (ganancia de informacion / impureza de Gini)
+  - Regresion logistica (gradiente descendiente)
+
+sklearn se usa UNICAMENTE para separar los datos (train_test_split) y para
+calcular metricas, tal como en las notas del curso.
 """
+
+import os
+import time
+import warnings
+from collections import Counter
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (
-    accuracy_score, precision_score, recall_score, f1_score,
-    confusion_matrix, classification_report
+    accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 )
 from ucimlrepo import fetch_ucirepo
-import os
-import warnings
-warnings.filterwarnings('ignore')
 
-# Configurar estilo de gráficas
-plt.style.use('seaborn-v0_8-darkgrid')
+warnings.filterwarnings('ignore')
+np.random.seed(12345)
+
+try:
+    plt.style.use('seaborn-v0_8-darkgrid')
+except Exception:
+    pass
 sns.set_palette("husl")
 
-# Crear directorio de outputs si no existe
 if not os.path.exists('outputs'):
     os.makedirs('outputs')
 
-print("="*80)
-print("PROYECTO FINAL: CLASIFICACIÓN DE HONGOS (VENENOSOS vs COMESTIBLES)")
-print("="*80)
+ROJO, AZUL = '#FF6B6B', '#4ECDC4'
+
+print("=" * 80)
+print("PROYECTO FINAL: CLASIFICACION DE HONGOS (VENENOSOS vs COMESTIBLES)")
+print("=" * 80)
+
+
+# ============================================================================
+# MODELO 1: ARBOL DE DECISION  (implementacion del material del curso)
+# ============================================================================
+class decisionnode:
+    """Nodo del arbol de decision."""
+    def __init__(self, feat=-1, value=None, results=None, tb=None, fb=None):
+        self.feat = feat        # indice de la columna sobre la que se decide
+        self.value = value      # valor del rasgo que define la particion
+        self.results = results  # Counter de clases (solo en hojas)
+        self.tb = tb            # rama "cumple el valor"
+        self.fb = fb            # rama "no cumple el valor"
+
+    def __str__(self):
+        if self.results is not None:
+            return "Class: {}".format(self.results)
+        return "Column {}: =={}?".format(self.feat, self.value)
+
+
+def divideSet(X, column, value):
+    """Biparticiona el conjunto segun si la columna toma cierto valor."""
+    if isinstance(value, (int, float)):
+        split_function = lambda row: row[column] >= value
+    else:
+        split_function = lambda row: row[column] == value
+    set1 = [i for i, row in enumerate(X) if split_function(row)]
+    set2 = [j for j, row in enumerate(X) if not split_function(row)]
+    return set1, set2
+
+
+def entropy(classes):
+    """Entropia: H(X) = -sum p(y) log2 p(y)."""
+    results = Counter(classes)
+    H = 0.0
+    for r in results.keys():
+        p = results[r] / len(classes)
+        H -= p * np.log2(p)
+    return H
+
+
+def giniimpurity(classes):
+    """Impureza de Gini: G(X) = sum p(y)(1 - p(y))."""
+    total = len(classes)
+    counts = Counter(classes)
+    Gini = 0
+    for y, frec in counts.items():
+        p = frec / total
+        Gini += p * (1 - p)
+    return Gini
+
+
+class DecisionTree():
+    """Arbol de decision basado en ganancia de informacion."""
+    def __init__(self, score=entropy):
+        self.score = score
+        self.tree = None
+
+    def buildTree(self, X, Y):
+        n, d = X.shape
+        current_score = self.score(Y)
+
+        best_gain = 0.0
+        best_criteria = None
+        best_sets = None
+        best_classes = None
+        for feature in range(0, d):
+            feature_values = set([x[feature] for x in X])
+            for value in feature_values:
+                set1, set2 = divideSet(X, feature, value)
+                p = float(len(set1)) / len(X)
+                # Ganancia de informacion: H(X) - E[H(X | rasgo)]
+                gain = current_score - p * self.score(Y[set1]) - (1 - p) * self.score(Y[set2])
+                if gain > best_gain and len(set1) > 0 and len(set2) > 0:
+                    best_gain = gain
+                    best_criteria = (feature, value)
+                    best_sets = (X[set1], X[set2])
+                    best_classes = (Y[set1], Y[set2])
+
+        if best_gain > 0:
+            trueBranch = self.buildTree(best_sets[0], best_classes[0])
+            falseBranch = self.buildTree(best_sets[1], best_classes[1])
+            return decisionnode(feat=best_criteria[0], value=best_criteria[1],
+                                tb=trueBranch, fb=falseBranch)
+        else:
+            return decisionnode(results=Counter(Y))
+
+    def fit(self, X, Y):
+        self.tree = self.buildTree(X, Y)
+
+    def predict(self, observation, subtree=None):
+        if self.tree is None:
+            raise Exception('Debe entrenarse el arbol. Usar metodo fit(x, y)')
+        tree = self.tree if subtree is None else subtree
+        if tree.results is not None:
+            return list(tree.results.keys())[0]
+        v = observation[tree.feat]
+        if isinstance(v, (int, float, np.integer, np.floating)):
+            branch = tree.tb if v >= tree.value else tree.fb
+        else:
+            branch = tree.tb if v == tree.value else tree.fb
+        return self.predict(observation, branch)
+
+
+def describe_tree(tree, feature_names, class_names, indent="", lines=None):
+    """Construye una lista de lineas legibles que describen el arbol."""
+    if lines is None:
+        lines = []
+    if tree.results is not None:
+        clase = list(tree.results.keys())[0]
+        lines.append(indent + "--> " + class_names[int(clase)])
+    else:
+        pregunta = "{} == '{}' ?".format(feature_names[tree.feat], tree.value)
+        lines.append(indent + pregunta)
+        lines.append(indent + " Si:")
+        describe_tree(tree.tb, feature_names, class_names, indent + "   ", lines)
+        lines.append(indent + " No:")
+        describe_tree(tree.fb, feature_names, class_names, indent + "   ", lines)
+    return lines
+
+
+# ============================================================================
+# MODELO 2: REGRESION LOGISTICA  (implementacion del material del curso)
+# ============================================================================
+# Funcion logistica: f(a) = 1 / (1 + e^-a), toma valores en (0, 1)
+logist = lambda a: 1. / (1. + np.exp(-a))
+
+
+class LogisticRegression():
+    """Regresion logistica entrenada con gradiente descendiente."""
+    def __init__(self, lr=0.1):
+        self.lr = lr            # tasa de aprendizaje (eta)
+        self.theta = None       # pesos theta_i
+        self.theta0 = 0         # sesgo theta_0
+
+    def fit(self, x, y, max_its=100):
+        m, d = x.shape
+        self.theta = np.random.rand(d) / np.sqrt(d)
+        stop = False
+        t = 0
+        while not stop:
+            for x_i, y_i in zip(x, y):
+                f = logist(np.dot(self.theta, x_i) + self.theta0)
+                # Regla de actualizacion: theta_i <- theta_i - eta (f(x) - y) x_i
+                self.theta = self.theta - self.lr * (f - y_i) * x_i
+                self.theta0 = self.theta0 - self.lr * (f - y_i)
+            t += 1
+            if t > max_its:
+                stop = True
+
+    def predict_proba(self, x):
+        return logist(np.dot(x, self.theta) + self.theta0)
+
+    def predict(self, x):
+        return 1 * (self.predict_proba(x) > 0.5)
+
 
 # ============================================================================
 # 1. DESCARGA DEL DATASET
 # ============================================================================
 print("\n[1] DESCARGANDO DATASET...")
-print("-"*80)
-
+print("-" * 80)
 try:
     mushroom = fetch_ucirepo(id=73)
     X = mushroom.data.features
     y = mushroom.data.targets
-    print(f"✓ Dataset descargado exitosamente desde UCI Machine Learning Repository")
+    # 'stalk-root' tiene valores faltantes (NaN). Los tratamos como una categoria
+    # mas ('faltante') para que todos los rasgos sean cadenas homogeneas: asi el
+    # arbol compara siempre por igualdad y el one-hot genera su propia columna.
+    X = X.fillna('faltante')
+    print("Dataset descargado desde UCI Machine Learning Repository (Mushroom, id=73)")
 except Exception as e:
-    print(f"✗ Error al descargar dataset: {e}")
-    exit()
+    print("Error al descargar el dataset: {}".format(e))
+    raise SystemExit
 
-# Confirmar que es un problema de clasificación binaria
-print(f"\nProblema identificado: CLASIFICACIÓN BINARIA")
-print(f"Clases a predecir: {y.columns[0]}")
-print(f"Valores únicos en target: {y[y.columns[0]].unique()}")
-print(f"Número de clases: {y[y.columns[0]].nunique()}")
-
-# ============================================================================
-# 2. DESCRIPCIÓN DEL DATASET
-# ============================================================================
-print("\n[2] DESCRIPCIÓN DEL DATASET")
-print("-"*80)
-
-# Obtener nombre de la columna target
 target_col = y.columns[0]
-y_series = y[target_col]
+y_series = y[target_col].astype(str)
 
-# Número de muestras y features
+print("\nProblema identificado: CLASIFICACION BINARIA")
+print("Variable objetivo: '{}'".format(target_col))
+print("Valores unicos en el objetivo: {}".format(sorted(y_series.unique())))
+
+
+# ============================================================================
+# 2. DESCRIPCION DEL DATASET
+# ============================================================================
+print("\n[2] DESCRIPCION DEL DATASET")
+print("-" * 80)
+
 n_samples, n_features = X.shape
-print(f"\nNúmero total de muestras: {n_samples}")
-print(f"Número de features: {n_features}")
-print(f"Features: {list(X.columns)}")
+print("\nNumero total de muestras: {}".format(n_samples))
+print("Numero de rasgos (features): {}".format(n_features))
+print("Rasgos: {}".format(list(X.columns)))
 
-# Split 70% train, 15% validación, 15% test
-X_temp, X_test, y_temp, y_test = train_test_split(
-    X, y_series, test_size=0.15, random_state=42, stratify=y_series
-)
-X_train, X_val, y_train, y_val = train_test_split(
-    X_temp, y_temp, test_size=(0.15/0.85), random_state=42, stratify=y_temp
-)
+print("\nDistribucion de la variable objetivo:")
+print(y_series.value_counts().to_string())
+print("\nProporcion:")
+print((y_series.value_counts(normalize=True) * 100).round(2).to_string())
 
-print(f"\nDivisión del dataset:")
-print(f"  • Entrenamiento: {len(X_train)} muestras (70%)")
-print(f"  • Validación: {len(X_val)} muestras (15%)")
-print(f"  • Test: {len(X_test)} muestras (15%)")
+# Descripcion estadistica de rasgos categoricos (no aplica media/rango numerico)
+print("\nDescripcion estadistica (rasgos categoricos):")
+print(X.describe().T[['count', 'unique', 'top', 'freq']].to_string())
 
-# Estadísticas descriptivas por columna (value_counts para categóricas)
-print(f"\nEstadísticas descriptivas del dataset completo:")
-print(f"\nDistribución de la variable objetivo ('{target_col}'):")
-print(y_series.value_counts())
-print(f"\nProporción:")
-print(y_series.value_counts(normalize=True))
-
-print("\nFrecuencia de las primeras 3 features:")
+print("\nFrecuencia de los primeros 3 rasgos:")
 for col in X.columns[:3]:
-    print(f"\n{col}:")
-    print(X[col].value_counts().head())
+    print("\n{}:".format(col))
+    print(X[col].value_counts().to_string())
 
-# ============================================================================
-# VISUALIZACIONES
-# ============================================================================
+# Codificacion de la clase objetivo a 0/1 (venenoso = 1, la clase de riesgo)
+clase_positiva = 'p' if 'p' in set(y_series.unique()) else sorted(y_series.unique())[-1]
+y01 = (y_series == clase_positiva).astype(int).values
+NOMBRES_CLASE = {0: 'Comestible', 1: 'Venenoso'}
+print("\nCodificacion del objetivo: '{}'=1 (Venenoso), resto=0 (Comestible)".format(clase_positiva))
 
-# Visualización 1: Distribución de clases
+# ---------- Particion 70% / 15% / 15% (estratificada) ----------
+idx = np.arange(n_samples)
+idx_temp, idx_test = train_test_split(idx, test_size=0.15, random_state=42, stratify=y01)
+idx_train, idx_val = train_test_split(idx_temp, test_size=0.15 / 0.85,
+                                      random_state=42, stratify=y01[idx_temp])
+
+print("\nDivision del dataset:")
+print("  - Entrenamiento: {} muestras (~70%)".format(len(idx_train)))
+print("  - Validacion:    {} muestras (~15%)".format(len(idx_val)))
+print("  - Prueba (test): {} muestras (~15%)".format(len(idx_test)))
+
+# ---------- Visualizacion 1: distribucion de clases ----------
 fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-
-# Gráfica 1: Distribución absoluta
 y_counts = y_series.value_counts()
-colors = ['#FF6B6B', '#4ECDC4']
-axes[0].bar(y_counts.index, y_counts.values, color=colors, alpha=0.7, edgecolor='black')
-axes[0].set_title('Distribución de Clases (Valores Absolutos)', fontsize=12, fontweight='bold')
-axes[0].set_xlabel('Clase', fontsize=10)
-axes[0].set_ylabel('Cantidad de muestras', fontsize=10)
+etiquetas = [NOMBRES_CLASE[int(v == clase_positiva)] for v in y_counts.index]
+axes[0].bar(etiquetas, y_counts.values, color=[AZUL, ROJO], alpha=0.8, edgecolor='black')
+axes[0].set_title('Distribucion de Clases (absoluta)', fontsize=12, fontweight='bold')
+axes[0].set_ylabel('Cantidad de muestras')
 for i, v in enumerate(y_counts.values):
-    axes[0].text(i, v + 10, str(v), ha='center', fontweight='bold')
-
-# Gráfica 2: Distribución proporcional
-y_prop = y_series.value_counts(normalize=True) * 100
-axes[1].pie(y_prop.values, labels=y_prop.index, autopct='%1.1f%%',
-            colors=colors, startangle=90, textprops={'fontsize': 11, 'fontweight': 'bold'})
-axes[1].set_title('Distribución de Clases (Porcentaje)', fontsize=12, fontweight='bold')
-
+    axes[0].text(i, v + 30, str(v), ha='center', fontweight='bold')
+axes[1].pie(y_counts.values, labels=etiquetas, autopct='%1.1f%%',
+            colors=[AZUL, ROJO], startangle=90, textprops={'fontweight': 'bold'})
+axes[1].set_title('Distribucion de Clases (porcentaje)', fontsize=12, fontweight='bold')
 plt.tight_layout()
-plt.savefig('outputs/01_distribucion_clases.png', dpi=300, bbox_inches='tight')
-print("\n✓ Gráfica guardada: outputs/01_distribucion_clases.png")
+plt.savefig('outputs/01_distribucion_clases.png', dpi=150, bbox_inches='tight')
 plt.close()
+print("\nGrafica guardada: outputs/01_distribucion_clases.png")
 
-# Visualización 2: Frecuencia de features relevantes
+# ---------- Visualizacion 2: frecuencia de rasgos ----------
 fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 axes = axes.ravel()
-
-feature_samples = X.columns[:4]
-for idx, col in enumerate(feature_samples):
+for i, col in enumerate(X.columns[:4]):
     counts = X[col].value_counts()
-    axes[idx].barh(range(len(counts)), counts.values, color='steelblue', alpha=0.7, edgecolor='black')
-    axes[idx].set_yticks(range(len(counts)))
-    axes[idx].set_yticklabels(counts.index)
-    axes[idx].set_title(f'Frecuencia: {col}', fontsize=11, fontweight='bold')
-    axes[idx].set_xlabel('Cantidad', fontsize=10)
-
+    axes[i].barh(range(len(counts)), counts.values, color='steelblue',
+                 alpha=0.8, edgecolor='black')
+    axes[i].set_yticks(range(len(counts)))
+    axes[i].set_yticklabels(counts.index)
+    axes[i].set_title("Frecuencia: {}".format(col), fontsize=11, fontweight='bold')
+    axes[i].set_xlabel('Cantidad')
 plt.tight_layout()
-plt.savefig('outputs/02_frecuencia_features.png', dpi=300, bbox_inches='tight')
-print("✓ Gráfica guardada: outputs/02_frecuencia_features.png")
+plt.savefig('outputs/02_frecuencia_rasgos.png', dpi=150, bbox_inches='tight')
 plt.close()
+print("Grafica guardada: outputs/02_frecuencia_rasgos.png")
+
 
 # ============================================================================
-# 3. PREPARACIÓN DE DATOS: CODIFICACIÓN DE VARIABLES CATEGÓRICAS
+# 3. PREPARACION DE DATOS
 # ============================================================================
-print("\n[3] PREPARACIÓN DE DATOS")
-print("-"*80)
+print("\n[3] PREPARACION DE DATOS")
+print("-" * 80)
+print("""
+Los dos modelos necesitan representaciones distintas:
 
-# Codificar variables categóricas
-label_encoders = {}
+  - ARBOL DE DECISION: trabaja directamente con los rasgos CATEGORICOS
+    (cadenas de texto). El arbol parte el conjunto preguntando '¿rasgo == valor?',
+    asi que NO se codifica nada.
 
-# Codificar X_train
-X_train_encoded = X_train.copy()
-for col in X_train_encoded.columns:
-    le = LabelEncoder()
-    X_train_encoded[col] = le.fit_transform(X_train_encoded[col])
-    label_encoders[col] = le
+  - REGRESION LOGISTICA: es un modelo lineal y calcula theta . x. Los rasgos son
+    categoricos NOMINALES (no tienen orden), por lo que se aplica codificacion
+    ONE-HOT (una columna binaria por categoria). Asignar enteros 0,1,2,... a las
+    categorias introduciria un orden falso que el modelo lineal tomaria literal.
+""")
 
-# Codificar X_val y X_test usando los encoders del training
-X_val_encoded = X_val.copy()
-X_test_encoded = X_test.copy()
-for col in X_val_encoded.columns:
-    X_val_encoded[col] = label_encoders[col].transform(X_val_encoded[col])
-    X_test_encoded[col] = label_encoders[col].transform(X_test_encoded[col])
+# Para el arbol: arreglos numpy de cadenas (datos crudos)
+X_np = X.values
+Xtr_tree, Xva_tree, Xte_tree = X_np[idx_train], X_np[idx_val], X_np[idx_test]
 
-# Codificar variable objetivo
-le_target = LabelEncoder()
-y_train_encoded = le_target.fit_transform(y_train)
-y_val_encoded = le_target.transform(y_val)
-y_test_encoded = le_target.transform(y_test)
+# Para la regresion logistica: one-hot. Columnas tomadas del entrenamiento.
+X_train_df = X.iloc[idx_train]
+cols_oh = pd.get_dummies(X_train_df).columns
+def a_one_hot(df):
+    return pd.get_dummies(df).reindex(columns=cols_oh, fill_value=0).astype(float).values
+Xtr_oh = a_one_hot(X_train_df)
+Xva_oh = a_one_hot(X.iloc[idx_val])
+Xte_oh = a_one_hot(X.iloc[idx_test])
 
-print(f"✓ Variables categóricas codificadas usando LabelEncoder")
-print(f"✓ Clases codificadas: {dict(zip(le_target.classes_, le_target.transform(le_target.classes_)))}")
+ytr, yva, yte = y01[idx_train], y01[idx_val], y01[idx_test]
+print("Arbol: {} rasgos categoricos | Regresion logistica: {} columnas one-hot"
+      .format(Xtr_tree.shape[1], Xtr_oh.shape[1]))
 
-# ============================================================================
-# 4. ELECCIÓN DE MODELOS Y JUSTIFICACIÓN
-# ============================================================================
-print("\n[3.1] JUSTIFICACIÓN DE MODELOS")
-print("-"*80)
-
-justificacion = """
-Se seleccionan dos modelos basados en árboles de decisión:
-
-1. ÁRBOL DE DECISIÓN (DecisionTreeClassifier):
-   - Interpretable y fácil de visualizar
-   - Apropiado para datos categóricos
-   - Rápido en entrenamiento
-   - Útil para identificar features importantes
-   - Riesgo de overfitting que mitiga con hiperparámetros
-
-2. RANDOM FOREST (RandomForestClassifier):
-   - Ensemble que reduce overfitting del árbol único
-   - Mejor generalización en datos complejos
-   - Maneja relaciones no-lineales
-   - Proporciona importancia de features más robusta
-   - Requiere más recursos pero mejor precisión esperada
-
-Ambos modelos son ideales para problemas de clasificación binaria con features
-categóricas, como el de hongos venenosos vs comestibles.
-"""
-print(justificacion)
 
 # ============================================================================
-# 5. ENTRENAMIENTO DETALLADO CON VALIDACIÓN
+#    JUSTIFICACION DE LOS MODELOS
 # ============================================================================
-print("\n[4] ENTRENAMIENTO DE MODELOS CON AJUSTE DE HIPERPARÁMETROS")
-print("-"*80)
+print("\n[3.1] JUSTIFICACION DE LOS MODELOS")
+print("-" * 80)
+print("""
+Se eligen dos modelos vistos en el curso que abordan la clasificacion desde
+paradigmas distintos, lo que hace la comparacion mas informativa:
 
-# Diccionario para almacenar resultados
-resultados = {}
+1. ARBOL DE DECISION (modelo NO parametrico):
+   - Clasifica con una jerarquia de reglas '¿rasgo == valor?', muy natural para
+     datos categoricos como los de los hongos.
+   - Es directamente interpretable: el arbol resultante son las reglas mismas.
+   - No asume forma de la frontera de decision ni necesita codificacion.
 
-# -------- MODELO 1: ÁRBOL DE DECISIÓN --------
-print("\n[4.1] ÁRBOL DE DECISIÓN")
-print("·"*40)
+2. REGRESION LOGISTICA (modelo parametrico / lineal):
+   - Estima p(venenoso | x) con la funcion logistica sobre una combinacion
+     lineal de los rasgos.
+   - Aprende un peso theta_i por categoria; esos pesos son el "estado de
+     creencias" del modelo: que tanto empuja cada categoria hacia 'venenoso'.
+   - Sirve de contraste: un modelo lineal frente a uno basado en reglas.
+""")
 
-# Búsqueda de hiperparámetros óptimos en validación
-print("Ajustando hiperparámetros en conjunto de validación...")
-
-best_score_dt = 0
-best_params_dt = {}
-param_grid_dt = {
-    'max_depth': [5, 7, 10, 15, 20],
-    'criterion': ['gini', 'entropy'],
-    'min_samples_split': [2, 5, 10]
-}
-
-for max_depth in param_grid_dt['max_depth']:
-    for criterion in param_grid_dt['criterion']:
-        for min_samples_split in param_grid_dt['min_samples_split']:
-            dt = DecisionTreeClassifier(
-                max_depth=max_depth,
-                criterion=criterion,
-                min_samples_split=min_samples_split,
-                random_state=42
-            )
-            dt.fit(X_train_encoded, y_train_encoded)
-            score = dt.score(X_val_encoded, y_val_encoded)
-
-            if score > best_score_dt:
-                best_score_dt = score
-                best_params_dt = {
-                    'max_depth': max_depth,
-                    'criterion': criterion,
-                    'min_samples_split': min_samples_split
-                }
-
-# Entrenar modelo final con mejores parámetros
-dt_model = DecisionTreeClassifier(
-    max_depth=best_params_dt['max_depth'],
-    criterion=best_params_dt['criterion'],
-    min_samples_split=best_params_dt['min_samples_split'],
-    random_state=42
-)
-dt_model.fit(X_train_encoded, y_train_encoded)
-
-print(f"\nHiperparámetros óptimos encontrados:")
-print(f"  • max_depth: {best_params_dt['max_depth']}")
-print(f"  • criterion: {best_params_dt['criterion']}")
-print(f"  • min_samples_split: {best_params_dt['min_samples_split']}")
-print(f"  • Exactitud en validación: {best_score_dt:.4f}")
-
-# Predicciones
-y_train_pred_dt = dt_model.predict(X_train_encoded)
-y_val_pred_dt = dt_model.predict(X_val_encoded)
-y_test_pred_dt = dt_model.predict(X_test_encoded)
-
-# -------- MODELO 2: RANDOM FOREST --------
-print("\n[4.2] RANDOM FOREST")
-print("·"*40)
-
-print("Ajustando hiperparámetros en conjunto de validación...")
-
-best_score_rf = 0
-best_params_rf = {}
-param_grid_rf = {
-    'n_estimators': [50, 100, 200],
-    'max_depth': [10, 15, 20, None],
-    'criterion': ['gini', 'entropy']
-}
-
-for n_estimators in param_grid_rf['n_estimators']:
-    for max_depth in param_grid_rf['max_depth']:
-        for criterion in param_grid_rf['criterion']:
-            rf = RandomForestClassifier(
-                n_estimators=n_estimators,
-                max_depth=max_depth,
-                criterion=criterion,
-                random_state=42,
-                n_jobs=-1
-            )
-            rf.fit(X_train_encoded, y_train_encoded)
-            score = rf.score(X_val_encoded, y_val_encoded)
-
-            if score > best_score_rf:
-                best_score_rf = score
-                best_params_rf = {
-                    'n_estimators': n_estimators,
-                    'max_depth': max_depth,
-                    'criterion': criterion
-                }
-
-# Entrenar modelo final con mejores parámetros
-rf_model = RandomForestClassifier(
-    n_estimators=best_params_rf['n_estimators'],
-    max_depth=best_params_rf['max_depth'],
-    criterion=best_params_rf['criterion'],
-    random_state=42,
-    n_jobs=-1
-)
-rf_model.fit(X_train_encoded, y_train_encoded)
-
-print(f"\nHiperparámetros óptimos encontrados:")
-print(f"  • n_estimators: {best_params_rf['n_estimators']}")
-print(f"  • max_depth: {best_params_rf['max_depth']}")
-print(f"  • criterion: {best_params_rf['criterion']}")
-print(f"  • Exactitud en validación: {best_score_rf:.4f}")
-
-# Predicciones
-y_train_pred_rf = rf_model.predict(X_train_encoded)
-y_val_pred_rf = rf_model.predict(X_val_encoded)
-y_test_pred_rf = rf_model.predict(X_test_encoded)
 
 # ============================================================================
-# 6. EVALUACIÓN CON MÉTRICAS
+# 4. ENTRENAMIENTO Y AJUSTE DE HIPERPARAMETROS (en validacion)
 # ============================================================================
-print("\n[5] EVALUACIÓN Y COMPARACIÓN DE MODELOS")
-print("-"*80)
+print("\n[4] ENTRENAMIENTO CON AJUSTE DE HIPERPARAMETROS")
+print("-" * 80)
 
-def obtener_metricas(y_true, y_pred, modelo_nombre, conjunto_nombre):
-    acc = accuracy_score(y_true, y_pred)
-    prec = precision_score(y_true, y_pred, zero_division=0)
-    rec = recall_score(y_true, y_pred, zero_division=0)
-    f1 = f1_score(y_true, y_pred, zero_division=0)
+# -------- ARBOL DE DECISION: criterio de particion (entropia vs Gini) --------
+print("\n[4.1] ARBOL DE DECISION")
+print("-" * 40)
+print("Hiperparametro a ajustar: criterio de particion (ganancia de informacion")
+print("con ENTROPIA vs IMPUREZA DE GINI). Se elige el mejor en validacion.\n")
+
+candidatos_arbol = {'entropy': entropy, 'gini': giniimpurity}
+mejor_crit, mejor_acc_arbol, mejor_arbol = None, -1, None
+for nombre, fn in candidatos_arbol.items():
+    t0 = time.time()
+    arbol = DecisionTree(score=fn)
+    arbol.fit(Xtr_tree, ytr)
+    pred_val = np.array([arbol.predict(x) for x in Xva_tree])
+    acc = accuracy_score(yva, pred_val)
+    print("  criterio={:8s} -> exactitud validacion = {:.4f}  ({:.1f}s)"
+          .format(nombre, acc, time.time() - t0))
+    if acc > mejor_acc_arbol:
+        mejor_acc_arbol, mejor_crit, mejor_arbol = acc, nombre, arbol
+
+dt_model = mejor_arbol
+print("\nCriterio seleccionado: {} (exactitud validacion = {:.4f})"
+      .format(mejor_crit, mejor_acc_arbol))
+
+# -------- REGRESION LOGISTICA: tasa de aprendizaje e iteraciones --------
+print("\n[4.2] REGRESION LOGISTICA")
+print("-" * 40)
+print("Hiperparametros a ajustar: tasa de aprendizaje (lr) y numero de")
+print("iteraciones (max_its). Se elige la mejor combinacion en validacion.\n")
+
+grid_lr = [0.01, 0.1, 0.5]
+grid_its = [50, 100]
+mejor_params_lr, mejor_acc_lr, mejor_lr_model = None, -1, None
+for lr in grid_lr:
+    for its in grid_its:
+        np.random.seed(12345)
+        t0 = time.time()
+        modelo = LogisticRegression(lr=lr)
+        modelo.fit(Xtr_oh, ytr, max_its=its)
+        acc = accuracy_score(yva, modelo.predict(Xva_oh))
+        print("  lr={:<5} max_its={:<4} -> exactitud validacion = {:.4f}  ({:.1f}s)"
+              .format(lr, its, acc, time.time() - t0))
+        if acc > mejor_acc_lr:
+            mejor_acc_lr, mejor_params_lr, mejor_lr_model = acc, (lr, its), modelo
+
+lr_model = mejor_lr_model
+print("\nHiperparametros seleccionados: lr={}, max_its={} (exactitud validacion = {:.4f})"
+      .format(mejor_params_lr[0], mejor_params_lr[1], mejor_acc_lr))
+
+
+# ============================================================================
+# 5. EVALUACION EN EL CONJUNTO DE PRUEBA
+# ============================================================================
+print("\n[5] EVALUACION Y COMPARACION (conjunto de prueba)")
+print("-" * 80)
+
+y_pred_dt = np.array([dt_model.predict(x) for x in Xte_tree])
+y_pred_lr = lr_model.predict(Xte_oh)
+
+
+def metricas(y_true, y_pred):
     return {
-        'modelo': modelo_nombre,
-        'conjunto': conjunto_nombre,
-        'accuracy': acc,
-        'precision': prec,
-        'recall': rec,
-        'f1': f1
+        'accuracy':  accuracy_score(y_true, y_pred),
+        'precision': precision_score(y_true, y_pred, zero_division=0),
+        'recall':    recall_score(y_true, y_pred, zero_division=0),
+        'f1':        f1_score(y_true, y_pred, zero_division=0),
     }
 
-# Calcular métricas para ambos modelos en test
-metricas_dt = obtener_metricas(y_test_encoded, y_test_pred_dt, 'Árbol de Decisión', 'Test')
-metricas_rf = obtener_metricas(y_test_encoded, y_test_pred_rf, 'Random Forest', 'Test')
 
-print("\nMÉTRICAS EN CONJUNTO DE TEST:")
-print("="*60)
-print(f"\n{'ÁRBOL DE DECISIÓN':^60}")
-print("-"*60)
-print(f"Exactitud (Accuracy):  {metricas_dt['accuracy']:.4f} ({metricas_dt['accuracy']*100:.2f}%)")
-print(f"Precisión:             {metricas_dt['precision']:.4f}")
-print(f"Recall:                {metricas_dt['recall']:.4f}")
-print(f"F1-Score:              {metricas_dt['f1']:.4f}")
+m_dt = metricas(yte, y_pred_dt)
+m_lr = metricas(yte, y_pred_lr)
 
-print(f"\n{'RANDOM FOREST':^60}")
-print("-"*60)
-print(f"Exactitud (Accuracy):  {metricas_rf['accuracy']:.4f} ({metricas_rf['accuracy']*100:.2f}%)")
-print(f"Precisión:             {metricas_rf['precision']:.4f}")
-print(f"Recall:                {metricas_rf['recall']:.4f}")
-print(f"F1-Score:              {metricas_rf['f1']:.4f}")
 
-# Matrices de confusión
-cm_dt = confusion_matrix(y_test_encoded, y_test_pred_dt)
-cm_rf = confusion_matrix(y_test_encoded, y_test_pred_rf)
+def imprime_metricas(nombre, m):
+    print("\n{:^60}".format(nombre))
+    print("-" * 60)
+    print("Exactitud (Accuracy):  {:.4f}  ({:.2f}%)".format(m['accuracy'], m['accuracy'] * 100))
+    print("Precision (venenoso):  {:.4f}".format(m['precision']))
+    print("Recall    (venenoso):  {:.4f}".format(m['recall']))
+    print("F1-Score:              {:.4f}".format(m['f1']))
 
-print("\nMATRICES DE CONFUSIÓN:")
-print("="*60)
-print(f"\n{'ÁRBOL DE DECISIÓN':^60}")
-print("-"*60)
-print(cm_dt)
-print(f"\n{'RANDOM FOREST':^60}")
-print("-"*60)
-print(cm_rf)
 
-# Visualización: Comparación de métricas lado a lado
-fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+print("\nMETRICAS EN PRUEBA (clase positiva = Venenoso):")
+print("=" * 60)
+imprime_metricas("ARBOL DE DECISION", m_dt)
+imprime_metricas("REGRESION LOGISTICA", m_lr)
 
-# Métricas en barras
-metricas_nombres = ['Accuracy', 'Precision', 'Recall', 'F1-Score']
-valores_dt = [metricas_dt['accuracy'], metricas_dt['precision'],
-              metricas_dt['recall'], metricas_dt['f1']]
-valores_rf = [metricas_rf['accuracy'], metricas_rf['precision'],
-              metricas_rf['recall'], metricas_rf['f1']]
+cm_dt = confusion_matrix(yte, y_pred_dt)
+cm_lr = confusion_matrix(yte, y_pred_lr)
+print("\nMATRICES DE CONFUSION (filas=real, columnas=prediccion):")
+print("\nArbol de decision:\n", cm_dt)
+print("\nRegresion logistica:\n", cm_lr)
 
-x = np.arange(len(metricas_nombres))
-width = 0.35
-
-axes[0].bar(x - width/2, valores_dt, width, label='Árbol de Decisión',
-            color='#FF6B6B', alpha=0.8, edgecolor='black')
-axes[0].bar(x + width/2, valores_rf, width, label='Random Forest',
-            color='#4ECDC4', alpha=0.8, edgecolor='black')
-axes[0].set_ylabel('Puntuación', fontsize=11, fontweight='bold')
-axes[0].set_title('Comparación de Métricas en Test', fontsize=12, fontweight='bold')
-axes[0].set_xticks(x)
-axes[0].set_xticklabels(metricas_nombres, fontsize=10)
-axes[0].legend(fontsize=10)
-axes[0].set_ylim([0, 1.05])
-axes[0].grid(axis='y', alpha=0.3)
-
-# Matrices de confusión
-axes[1].axis('off')
-axes[1].text(0.5, 0.95, 'Matrices de Confusión (Test Set)',
-             ha='center', fontsize=12, fontweight='bold', transform=axes[1].transAxes)
-
-# Texto de matrices
-texto_cm = f"""
-ÁRBOL DE DECISIÓN:
-{cm_dt[0][0]:5d}  {cm_dt[0][1]:5d}
-{cm_dt[1][0]:5d}  {cm_dt[1][1]:5d}
-
-RANDOM FOREST:
-{cm_rf[0][0]:5d}  {cm_rf[0][1]:5d}
-{cm_rf[1][0]:5d}  {cm_rf[1][1]:5d}
-"""
-axes[1].text(0.1, 0.5, texto_cm, fontfamily='monospace', fontsize=10,
-             verticalalignment='center', transform=axes[1].transAxes)
-
+# ---------- Grafica: comparacion de metricas ----------
+nombres_m = ['Accuracy', 'Precision', 'Recall', 'F1-Score']
+val_dt = [m_dt['accuracy'], m_dt['precision'], m_dt['recall'], m_dt['f1']]
+val_lr = [m_lr['accuracy'], m_lr['precision'], m_lr['recall'], m_lr['f1']]
+x = np.arange(len(nombres_m)); w = 0.35
+fig, ax = plt.subplots(figsize=(9, 5))
+ax.bar(x - w / 2, val_dt, w, label='Arbol de decision', color=ROJO, alpha=0.85, edgecolor='black')
+ax.bar(x + w / 2, val_lr, w, label='Regresion logistica', color=AZUL, alpha=0.85, edgecolor='black')
+ax.set_ylabel('Puntuacion', fontweight='bold')
+ax.set_title('Comparacion de metricas en prueba', fontsize=12, fontweight='bold')
+ax.set_xticks(x); ax.set_xticklabels(nombres_m)
+ax.set_ylim([0, 1.05]); ax.legend(); ax.grid(axis='y', alpha=0.3)
+for i, (a, b) in enumerate(zip(val_dt, val_lr)):
+    ax.text(i - w / 2, a + 0.01, "{:.3f}".format(a), ha='center', fontsize=8)
+    ax.text(i + w / 2, b + 0.01, "{:.3f}".format(b), ha='center', fontsize=8)
 plt.tight_layout()
-plt.savefig('outputs/03_comparacion_modelos.png', dpi=300, bbox_inches='tight')
-print("\n✓ Gráfica guardada: outputs/03_comparacion_modelos.png")
+plt.savefig('outputs/03_comparacion_metricas.png', dpi=150, bbox_inches='tight')
 plt.close()
+print("\nGrafica guardada: outputs/03_comparacion_metricas.png")
 
-# Visualización: Matrices de confusión heatmap
+# ---------- Grafica: matrices de confusion ----------
 fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-
-sns.heatmap(cm_dt, annot=True, fmt='d', cmap='Blues', ax=axes[0],
-            xticklabels=['Comestible', 'Venenoso'],
-            yticklabels=['Comestible', 'Venenoso'],
-            cbar_kws={'label': 'Cantidad'})
-axes[0].set_title('Matriz de Confusión - Árbol de Decisión', fontsize=12, fontweight='bold')
-axes[0].set_ylabel('Real', fontsize=10)
-axes[0].set_xlabel('Predicción', fontsize=10)
-
-sns.heatmap(cm_rf, annot=True, fmt='d', cmap='Greens', ax=axes[1],
-            xticklabels=['Comestible', 'Venenoso'],
-            yticklabels=['Comestible', 'Venenoso'],
-            cbar_kws={'label': 'Cantidad'})
-axes[1].set_title('Matriz de Confusión - Random Forest', fontsize=12, fontweight='bold')
-axes[1].set_ylabel('Real', fontsize=10)
-axes[1].set_xlabel('Predicción', fontsize=10)
-
+etq = ['Comestible', 'Venenoso']
+sns.heatmap(cm_dt, annot=True, fmt='d', cmap='Reds', ax=axes[0],
+            xticklabels=etq, yticklabels=etq, cbar=False)
+axes[0].set_title('Matriz de confusion - Arbol de decision', fontweight='bold')
+axes[0].set_ylabel('Real'); axes[0].set_xlabel('Prediccion')
+sns.heatmap(cm_lr, annot=True, fmt='d', cmap='Greens', ax=axes[1],
+            xticklabels=etq, yticklabels=etq, cbar=False)
+axes[1].set_title('Matriz de confusion - Regresion logistica', fontweight='bold')
+axes[1].set_ylabel('Real'); axes[1].set_xlabel('Prediccion')
 plt.tight_layout()
-plt.savefig('outputs/04_matrices_confusion.png', dpi=300, bbox_inches='tight')
-print("✓ Gráfica guardada: outputs/04_matrices_confusion.png")
+plt.savefig('outputs/04_matrices_confusion.png', dpi=150, bbox_inches='tight')
 plt.close()
+print("Grafica guardada: outputs/04_matrices_confusion.png")
+
 
 # ============================================================================
-# 7. IMPORTANCIA DE FEATURES
+# 5.1 INTERPRETABILIDAD DE LOS MODELOS
 # ============================================================================
-print("\n[5.1] IMPORTANCIA DE FEATURES")
-print("-"*80)
+print("\n[5.1] INTERPRETABILIDAD")
+print("-" * 80)
 
-# Features importances
-importances_dt = dt_model.feature_importances_
-importances_rf = rf_model.feature_importances_
+# --- Arbol: reglas aprendidas (se guardan completas, se muestra el inicio) ---
+lineas_arbol = describe_tree(dt_model.tree, list(X.columns), NOMBRES_CLASE)
+rasgo_raiz = X.columns[dt_model.tree.feat] if dt_model.tree.results is None else None
+print("\nReglas del arbol (primer rasgo de decision: '{}'):".format(rasgo_raiz))
+print("\n".join(lineas_arbol[:12]))
+if len(lineas_arbol) > 12:
+    print("   ... (arbol completo en outputs/arbol_decision.txt)")
+with open('outputs/arbol_decision.txt', 'w', encoding='utf-8') as f:
+    f.write("ARBOL DE DECISION (criterio: {})\n".format(mejor_crit))
+    f.write("=" * 60 + "\n")
+    f.write("\n".join(lineas_arbol))
 
-# Ordenar por importancia
-indices_dt = np.argsort(importances_dt)[::-1][:10]
-indices_rf = np.argsort(importances_rf)[::-1][:10]
+# --- Regresion logistica: pesos theta = "estado de creencias" ---
+pesos = pd.Series(lr_model.theta, index=cols_oh).sort_values()
+print("\nRegresion logistica - rasgos que mas empujan hacia VENENOSO (theta > 0):")
+for nombre, val in pesos.tail(5)[::-1].items():
+    print("  {:30s}  theta = {:+.3f}".format(nombre, val))
+print("\nRasgos que mas empujan hacia COMESTIBLE (theta < 0):")
+for nombre, val in pesos.head(5).items():
+    print("  {:30s}  theta = {:+.3f}".format(nombre, val))
 
-print("\nTOP 10 FEATURES - ÁRBOL DE DECISIÓN:")
-for i, idx in enumerate(indices_dt, 1):
-    print(f"  {i:2d}. {X.columns[idx]:25s} : {importances_dt[idx]:.4f}")
-
-print("\nTOP 10 FEATURES - RANDOM FOREST:")
-for i, idx in enumerate(indices_rf, 1):
-    print(f"  {i:2d}. {X.columns[idx]:25s} : {importances_rf[idx]:.4f}")
-
-# Visualización: Feature importance
-fig, axes = plt.subplots(1, 2, figsize=(14, 6))
-
-# Árbol de Decisión
-top_features_dt = [X.columns[i] for i in indices_dt]
-axes[0].barh(range(len(top_features_dt)), importances_dt[indices_dt],
-             color='#FF6B6B', alpha=0.7, edgecolor='black')
-axes[0].set_yticks(range(len(top_features_dt)))
-axes[0].set_yticklabels(top_features_dt)
-axes[0].set_xlabel('Importancia', fontsize=10, fontweight='bold')
-axes[0].set_title('Top 10 Features - Árbol de Decisión', fontsize=12, fontweight='bold')
-axes[0].invert_yaxis()
-
-# Random Forest
-top_features_rf = [X.columns[i] for i in indices_rf]
-axes[1].barh(range(len(top_features_rf)), importances_rf[indices_rf],
-             color='#4ECDC4', alpha=0.7, edgecolor='black')
-axes[1].set_yticks(range(len(top_features_rf)))
-axes[1].set_yticklabels(top_features_rf)
-axes[1].set_xlabel('Importancia', fontsize=10, fontweight='bold')
-axes[1].set_title('Top 10 Features - Random Forest', fontsize=12, fontweight='bold')
-axes[1].invert_yaxis()
-
+# Grafica de pesos mas influyentes (|theta|)
+top = pesos.reindex(pesos.abs().sort_values().tail(15).index)
+fig, ax = plt.subplots(figsize=(10, 7))
+colores = [ROJO if v > 0 else AZUL for v in top.values]
+ax.barh(range(len(top)), top.values, color=colores, alpha=0.85, edgecolor='black')
+ax.set_yticks(range(len(top))); ax.set_yticklabels(top.index)
+ax.axvline(0, color='black', lw=0.8)
+ax.set_xlabel('Peso theta  (>0 empuja a Venenoso, <0 a Comestible)', fontweight='bold')
+ax.set_title('Regresion logistica: rasgos mas influyentes', fontsize=12, fontweight='bold')
 plt.tight_layout()
-plt.savefig('outputs/05_importancia_features.png', dpi=300, bbox_inches='tight')
-print("\n✓ Gráfica guardada: outputs/05_importancia_features.png")
+plt.savefig('outputs/05_pesos_regresion.png', dpi=150, bbox_inches='tight')
 plt.close()
+print("\nGrafica guardada: outputs/05_pesos_regresion.png")
+
 
 # ============================================================================
-# 8. CONCLUSIONES Y ANÁLISIS CUALITATIVO
+# 6. CONCLUSIONES Y ANALISIS CUALITATIVO
 # ============================================================================
-print("\n[6] CONCLUSIONES Y ANÁLISIS")
-print("="*80)
+print("\n[6] CONCLUSIONES")
+print("=" * 80)
 
-mejor_modelo = "Random Forest" if metricas_rf['f1'] > metricas_dt['f1'] else "Árbol de Decisión"
-diferencia_f1 = abs(metricas_rf['f1'] - metricas_dt['f1'])
+if abs(m_dt['f1'] - m_lr['f1']) < 1e-4:
+    veredicto = "Ambos modelos obtienen practicamente el mismo desempeno."
+elif m_dt['f1'] > m_lr['f1']:
+    veredicto = "El arbol de decision obtuvo un F1 ligeramente mayor."
+else:
+    veredicto = "La regresion logistica obtuvo un F1 ligeramente mayor."
 
-conclusiones = f"""
-ANÁLISIS CUALITATIVO DEL PROYECTO:
+top_venenoso = ", ".join(pesos.tail(3)[::-1].index)
 
-1. MEJOR MODELO: {mejor_modelo}
-   {'─'*76}
-   El modelo {mejor_modelo} obtuvo mejor desempeño:
-   • F1-Score: {metricas_rf['f1']:.4f} (Random Forest) vs {metricas_dt['f1']:.4f} (Árbol)
-   • Diferencia: {diferencia_f1:.4f}
+conclusiones = """
+ANALISIS CUALITATIVO
 
-   Random Forest generalmente supera al Árbol de Decisión porque:
-   - El ensemble reduce overfitting
-   - Captura mejor las relaciones complejas entre features
-   - Mayor robustez en generalización a datos nuevos
+1. DESEMPENO GENERAL
+   {linea}
+   Arbol de decision   -> Accuracy {acc_dt:.4f} | F1 {f1_dt:.4f}
+   Regresion logistica -> Accuracy {acc_lr:.4f} | F1 {f1_lr:.4f}
 
-2. FEATURES MÁS IMPORTANTES:
-   {'─'*76}
-   Las features más relevantes para clasificar hongos son:
+   {veredicto} Esto era esperable: el conjunto de hongos es casi perfectamente
+   separable a partir de los rasgos categoricos, por lo que dos modelos de
+   naturaleza muy distinta llegan ambos a una exactitud muy alta. La conclusion
+   relevante NO es "cual gana por unas decimas", sino que el problema es
+   linealmente/estructuralmente facil y que el verdadero contraste esta en la
+   INTERPRETABILIDAD.
 
-   RANDOM FOREST (Top 3):
-   • {X.columns[indices_rf[0]]}: {importances_rf[indices_rf[0]]:.4f}
-   • {X.columns[indices_rf[1]]}: {importances_rf[indices_rf[1]]:.4f}
-   • {X.columns[indices_rf[2]]}: {importances_rf[indices_rf[2]]:.4f}
+2. QUE APRENDIO CADA MODELO
+   {linea}
+   - El arbol de decision toma como primera regla el rasgo '{raiz}', lo que
+     indica que por si solo separa gran parte de las clases. El arbol completo
+     (outputs/arbol_decision.txt) es una lista de reglas '¿rasgo == valor?'
+     directamente legible.
+   - La regresion logistica coincide en lo esencial: las categorias con mayor
+     peso positivo hacia 'venenoso' son {top_ven}. Sus pesos theta dan una
+     lectura cuantitativa de cuanto contribuye cada categoria.
 
-   Estas características capturan las diferencias fundamentales entre
-   hongos venenosos y comestibles en el dataset.
+3. INTERPRETACION DE LAS METRICAS (clase positiva = Venenoso)
+   {linea}
+   En este dominio el RECALL de la clase 'venenoso' es la metrica critica: un
+   falso negativo (clasificar como comestible un hongo venenoso) es el error
+   peligroso. Conviene leer la matriz de confusion priorizando esa celda por
+   encima de la exactitud global.
 
-3. LIMITACIONES DEL ENFOQUE:
-   {'─'*76}
-   • El dataset contiene solo características categóricas. No hay información
-     numérica sobre tamaño, peso u otras medidas continuas que podrían mejorar
-     la clasificación.
+4. LIMITACIONES
+   {linea}
+   - El dataset solo tiene rasgos categoricos; no hay medidas continuas (tamano,
+     peso) que podrian ser necesarias en casos mas dificiles.
+   - La alta separabilidad hace que las metricas sean optimistas; en un problema
+     mas ruidoso la diferencia entre modelos seria mayor.
+   - El arbol implementado crece hasta separar por completo (sin poda ni
+     profundidad maxima), por lo que con datos ruidosos tenderia al sobreajuste.
+   - La regresion logistica usa gradiente descendiente basico; sobre datos
+     separables los pesos crecen sin cota teorica (aqui se controla con un numero
+     fijo de iteraciones).
+   - Se uso una particion fija con validacion estratificada; una validacion
+     cruzada k-fold daria una estimacion mas robusta.
 
-   • La mayoría de muestras son de ciertas especies. El desbalance de clases
-     (si existe) puede favorecer la clase mayoritaria.
-
-   • Los modelos basados en árboles pueden no capturar interacciones
-     complejas entre features que requieren capas de redes neuronales.
-
-   • No se consideraron técnicas de validación cruzada más robustas
-     (k-fold cross-validation) aunque sí se usó validación estratificada.
-
-4. MÉTRICAS FINALES EN TEST:
-   {'─'*76}
-   Random Forest:
-   • Accuracy:  {metricas_rf['accuracy']:.4f} ({metricas_rf['accuracy']*100:.2f}%)
-   • Precision: {metricas_rf['precision']:.4f} (pocos falsos positivos)
-   • Recall:    {metricas_rf['recall']:.4f} (captura bien la clase mayoritaria)
-   • F1-Score:  {metricas_rf['f1']:.4f}
-
-   Árbol de Decisión:
-   • Accuracy:  {metricas_dt['accuracy']:.4f} ({metricas_dt['accuracy']*100:.2f}%)
-   • Precision: {metricas_dt['precision']:.4f}
-   • Recall:    {metricas_dt['recall']:.4f}
-   • F1-Score:  {metricas_dt['f1']:.4f}
-
-5. RECOMENDACIONES:
-   {'─'*76}
-   ✓ Usar Random Forest como modelo en producción para clasificar nuevos hongos
-   ✓ Considerar técnicas de data augmentation para mejorar el recall
-   ✓ Recolectar más datos de hongos venenosos si es posible
-   ✓ Explorar técnicas de ensemble más avanzadas (Gradient Boosting, XGBoost)
-   ✓ Implementar validación cruzada k-fold para evaluación más robusta
-
-{'='*80}
-"""
+5. RECOMENDACIONES
+   {linea}
+   - Para clasificar nuevos hongos basta cualquiera de los dos modelos; se
+     preferiria el arbol si se necesita explicar la decision con reglas, y la
+     regresion logistica si se quiere una probabilidad calibrada.
+   - Ante un costo asimetrico (es peor liberar un venenoso), subir el umbral de
+     decision de la regresion logistica para favorecer el recall de 'venenoso'.
+   - Validar con k-fold y, de ser posible, con datos de otras regiones.
+""".format(
+    linea="-" * 74,
+    acc_dt=m_dt['accuracy'], f1_dt=m_dt['f1'],
+    acc_lr=m_lr['accuracy'], f1_lr=m_lr['f1'],
+    veredicto=veredicto, raiz=rasgo_raiz, top_ven=top_venenoso,
+)
 
 print(conclusiones)
 
-# Guardar conclusiones en un archivo de texto
 with open('outputs/CONCLUSIONES.txt', 'w', encoding='utf-8') as f:
-    f.write("PROYECTO FINAL: CLASIFICACIÓN DE HONGOS\n")
-    f.write("="*80 + "\n")
+    f.write("PROYECTO FINAL: CLASIFICACION DE HONGOS\n")
+    f.write("=" * 80 + "\n")
     f.write(conclusiones)
 
-print("✓ Conclusiones guardadas en: outputs/CONCLUSIONES.txt")
-
-print("\n" + "="*80)
-print("PROYECTO COMPLETADO EXITOSAMENTE")
-print("="*80)
-print("\nArchivos generados:")
-print("  • outputs/01_distribucion_clases.png")
-print("  • outputs/02_frecuencia_features.png")
-print("  • outputs/03_comparacion_modelos.png")
-print("  • outputs/04_matrices_confusion.png")
-print("  • outputs/05_importancia_features.png")
-print("  • outputs/CONCLUSIONES.txt")
-print("\n")
+print("=" * 80)
+print("PROYECTO COMPLETADO")
+print("=" * 80)
+print("\nArchivos generados en outputs/:")
+for nombre in ["01_distribucion_clases.png", "02_frecuencia_rasgos.png",
+               "03_comparacion_metricas.png", "04_matrices_confusion.png",
+               "05_pesos_regresion.png", "arbol_decision.txt", "CONCLUSIONES.txt"]:
+    print("  - outputs/{}".format(nombre))
