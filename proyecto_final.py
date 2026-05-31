@@ -1,15 +1,13 @@
 """
-================================================================================
 PROYECTO FINAL: CLASIFICACION DE HONGOS (VENENOSOS vs COMESTIBLES)
 Facultad de Ciencias, UNAM - Aprendizaje de Maquina
-================================================================================
 
 Modelos implementados DESDE CERO siguiendo el material del curso:
   - Arbol de decision (ganancia de informacion / impureza de Gini)
   - Regresion logistica (gradiente descendiente)
 
 sklearn se usa UNICAMENTE para separar los datos (train_test_split) y para
-calcular metricas, tal como en las notas del curso.
+calcular metricas
 """
 
 import os
@@ -40,24 +38,24 @@ sns.set_palette("husl")
 if not os.path.exists('outputs'):
     os.makedirs('outputs')
 
-ROJO, AZUL = '#FF6B6B', '#4ECDC4'
+ROJO, AZUL = '#FF6B6B', '#4ECDC4' # <-- para q se vea god 
 
 print("=" * 80)
 print("PROYECTO FINAL: CLASIFICACION DE HONGOS (VENENOSOS vs COMESTIBLES)")
 print("=" * 80)
 
 
-# ============================================================================
-# MODELO 1: ARBOL DE DECISION  (implementacion del material del curso)
-# ============================================================================
+# MODELO 1: ARBOL DE DECISION 
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# nota: lo sacamos de las notas del profe
 class decisionnode:
     """Nodo del arbol de decision."""
     def __init__(self, feat=-1, value=None, results=None, tb=None, fb=None):
-        self.feat = feat        # indice de la columna sobre la que se decide
-        self.value = value      # valor del rasgo que define la particion
-        self.results = results  # Counter de clases (solo en hojas)
-        self.tb = tb            # rama "cumple el valor"
-        self.fb = fb            # rama "no cumple el valor"
+        self.feat = feat        # id de la columna sobre la que se decide
+        self.value = value      # valor del rasgo que define la part.
+        self.results = results  # counter clases (solo en hojas jeje)
+        self.tb = tb            # rama -> cumple el valor"
+        self.fb = fb            # rama -> no cumple el valor"
 
     def __str__(self):
         if self.results is not None:
@@ -166,10 +164,11 @@ def describe_tree(tree, feature_names, class_names, indent="", lines=None):
     return lines
 
 
-# ============================================================================
-# MODELO 2: REGRESION LOGISTICA  (implementacion del material del curso)
-# ============================================================================
-# Funcion logistica: f(a) = 1 / (1 + e^-a), toma valores en (0, 1)
+# MODELO 2: REGRESION LOGISTICA
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# nota: tmb de las notas jaja
+
+# Funcion logistica: f(a) = 1 / (1 + e^-a) toma valores en (0, 1)
 logist = lambda a: 1. / (1. + np.exp(-a))
 
 
@@ -202,18 +201,18 @@ class LogisticRegression():
         return 1 * (self.predict_proba(x) > 0.5)
 
 
-# ============================================================================
 # 1. DESCARGA DEL DATASET
-# ============================================================================
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 print("\n[1] DESCARGANDO DATASET...")
 print("-" * 80)
 try:
     mushroom = fetch_ucirepo(id=73)
     X = mushroom.data.features
+    # X = mushroom.data.tagets
     y = mushroom.data.targets
-    # 'stalk-root' tiene valores faltantes (NaN). Los tratamos como una categoria
-    # mas ('faltante') para que todos los rasgos sean cadenas homogeneas: asi el
-    # arbol compara siempre por igualdad y el one-hot genera su propia columna.
+    # 'stalk-root' tiene valores faltantes (NaN)... Los tratamos como una categoria
+    # mas ('faltante') para q todos los rasgos sean cadenas homogeneas: asi el
+    # arbol compara siempre por igualdad y el one-hot genera su propia column
     X = X.fillna('faltante')
     print("Dataset descargado desde UCI Machine Learning Repository (Mushroom, id=73)")
 except Exception as e:
@@ -228,9 +227,8 @@ print("Variable objetivo: '{}'".format(target_col))
 print("Valores unicos en el objetivo: {}".format(sorted(y_series.unique())))
 
 
-# ============================================================================
 # 2. DESCRIPCION DEL DATASET
-# ============================================================================
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 print("\n[2] DESCRIPCION DEL DATASET")
 print("-" * 80)
 
@@ -259,7 +257,7 @@ y01 = (y_series == clase_positiva).astype(int).values
 NOMBRES_CLASE = {0: 'Comestible', 1: 'Venenoso'}
 print("\nCodificacion del objetivo: '{}'=1 (Venenoso), resto=0 (Comestible)".format(clase_positiva))
 
-# ---------- Particion 70% / 15% / 15% (estratificada) ----------
+# Particion 70% / 15% / 15% (estratificada) 
 idx = np.arange(n_samples)
 idx_temp, idx_test = train_test_split(idx, test_size=0.15, random_state=42, stratify=y01)
 idx_train, idx_val = train_test_split(idx_temp, test_size=0.15 / 0.85,
@@ -270,7 +268,7 @@ print("  - Entrenamiento: {} muestras (~70%)".format(len(idx_train)))
 print("  - Validacion:    {} muestras (~15%)".format(len(idx_val)))
 print("  - Prueba (test): {} muestras (~15%)".format(len(idx_test)))
 
-# ---------- Visualizacion 1: distribucion de clases ----------
+#   Visual 1: distribucion de clases 
 fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 y_counts = y_series.value_counts()
 etiquetas = [NOMBRES_CLASE[int(v == clase_positiva)] for v in y_counts.index]
@@ -287,7 +285,7 @@ plt.savefig('outputs/01_distribucion_clases.png', dpi=150, bbox_inches='tight')
 plt.close()
 print("\nGrafica guardada: outputs/01_distribucion_clases.png")
 
-# ---------- Visualizacion 2: frecuencia de rasgos ----------
+#  Visual 2: frecuencia de rasgos 
 fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 axes = axes.ravel()
 for i, col in enumerate(X.columns[:4]):
@@ -304,9 +302,8 @@ plt.close()
 print("Grafica guardada: outputs/02_frecuencia_rasgos.png")
 
 
-# ============================================================================
 # 3. PREPARACION DE DATOS
-# ============================================================================
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 print("\n[3] PREPARACION DE DATOS")
 print("-" * 80)
 print("""
@@ -322,11 +319,11 @@ Los dos modelos necesitan representaciones distintas:
     categorias introduciria un orden falso que el modelo lineal tomaria literal.
 """)
 
-# Para el arbol: arreglos numpy de cadenas (datos crudos)
+# para el TREE arreglos numpy de cadenas (datos crudos)
 X_np = X.values
 Xtr_tree, Xva_tree, Xte_tree = X_np[idx_train], X_np[idx_val], X_np[idx_test]
 
-# Para la regresion logistica: one-hot. Columnas tomadas del entrenamiento.
+# para la regresion logistica: one-hot... colum tomadas del entrenamiento
 X_train_df = X.iloc[idx_train]
 cols_oh = pd.get_dummies(X_train_df).columns
 def a_one_hot(df):
@@ -340,9 +337,8 @@ print("Arbol: {} rasgos categoricos | Regresion logistica: {} columnas one-hot"
       .format(Xtr_tree.shape[1], Xtr_oh.shape[1]))
 
 
-# ============================================================================
 #    JUSTIFICACION DE LOS MODELOS
-# ============================================================================
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 print("\n[3.1] JUSTIFICACION DE LOS MODELOS")
 print("-" * 80)
 print("""
@@ -364,13 +360,12 @@ paradigmas distintos, lo que hace la comparacion mas informativa:
 """)
 
 
-# ============================================================================
 # 4. ENTRENAMIENTO Y AJUSTE DE HIPERPARAMETROS (en validacion)
-# ============================================================================
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 print("\n[4] ENTRENAMIENTO CON AJUSTE DE HIPERPARAMETROS")
 print("-" * 80)
 
-# -------- ARBOL DE DECISION: criterio de particion (entropia vs Gini) --------
+#  ARBOL DE DECISION: criterio de particion (entropia vs Gini) 
 print("\n[4.1] ARBOL DE DECISION")
 print("-" * 40)
 print("Hiperparametro a ajustar: criterio de particion (ganancia de informacion")
@@ -393,7 +388,7 @@ dt_model = mejor_arbol
 print("\nCriterio seleccionado: {} (exactitud validacion = {:.4f})"
       .format(mejor_crit, mejor_acc_arbol))
 
-# -------- REGRESION LOGISTICA: tasa de aprendizaje e iteraciones --------
+#  REGRESION LOGISTICA: tasa de aprendizaje e iteraciones 
 print("\n[4.2] REGRESION LOGISTICA")
 print("-" * 40)
 print("Hiperparametros a ajustar: tasa de aprendizaje (lr) y numero de")
@@ -419,9 +414,8 @@ print("\nHiperparametros seleccionados: lr={}, max_its={} (exactitud validacion 
       .format(mejor_params_lr[0], mejor_params_lr[1], mejor_acc_lr))
 
 
-# ============================================================================
 # 5. EVALUACION EN EL CONJUNTO DE PRUEBA
-# ============================================================================
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 print("\n[5] EVALUACION Y COMPARACION (conjunto de prueba)")
 print("-" * 80)
 
@@ -462,7 +456,7 @@ print("\nMATRICES DE CONFUSION (filas=real, columnas=prediccion):")
 print("\nArbol de decision:\n", cm_dt)
 print("\nRegresion logistica:\n", cm_lr)
 
-# ---------- Grafica: comparacion de metricas ----------
+#  Grafica: comparacion de metricas 
 nombres_m = ['Accuracy', 'Precision', 'Recall', 'F1-Score']
 val_dt = [m_dt['accuracy'], m_dt['precision'], m_dt['recall'], m_dt['f1']]
 val_lr = [m_lr['accuracy'], m_lr['precision'], m_lr['recall'], m_lr['f1']]
@@ -482,7 +476,7 @@ plt.savefig('outputs/03_comparacion_metricas.png', dpi=150, bbox_inches='tight')
 plt.close()
 print("\nGrafica guardada: outputs/03_comparacion_metricas.png")
 
-# ---------- Grafica: matrices de confusion ----------
+#  Grafica: matrices de confusion 
 fig, axes = plt.subplots(1, 2, figsize=(12, 4))
 etq = ['Comestible', 'Venenoso']
 sns.heatmap(cm_dt, annot=True, fmt='d', cmap='Reds', ax=axes[0],
@@ -499,13 +493,12 @@ plt.close()
 print("Grafica guardada: outputs/04_matrices_confusion.png")
 
 
-# ============================================================================
 # 5.1 INTERPRETABILIDAD DE LOS MODELOS
-# ============================================================================
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 print("\n[5.1] INTERPRETABILIDAD")
 print("-" * 80)
 
-# --- Arbol: reglas aprendidas (se guardan completas, se muestra el inicio) ---
+# tree: reglas aprendidas (se guardan completas, se muestra el inicio)
 lineas_arbol = describe_tree(dt_model.tree, list(X.columns), NOMBRES_CLASE)
 rasgo_raiz = X.columns[dt_model.tree.feat] if dt_model.tree.results is None else None
 print("\nReglas del arbol (primer rasgo de decision: '{}'):".format(rasgo_raiz))
@@ -517,7 +510,7 @@ with open('outputs/arbol_decision.txt', 'w', encoding='utf-8') as f:
     f.write("=" * 60 + "\n")
     f.write("\n".join(lineas_arbol))
 
-# --- Regresion logistica: pesos theta = "estado de creencias" ---
+# rgresion logistica: pesos theta = "estado de creencias"
 pesos = pd.Series(lr_model.theta, index=cols_oh).sort_values()
 print("\nRegresion logistica - rasgos que mas empujan hacia VENENOSO (theta > 0):")
 for nombre, val in pesos.tail(5)[::-1].items():
@@ -526,7 +519,7 @@ print("\nRasgos que mas empujan hacia COMESTIBLE (theta < 0):")
 for nombre, val in pesos.head(5).items():
     print("  {:30s}  theta = {:+.3f}".format(nombre, val))
 
-# Grafica de pesos mas influyentes (|theta|)
+# grafica de pesos mas influyentes (|theta|)
 top = pesos.reindex(pesos.abs().sort_values().tail(15).index)
 fig, ax = plt.subplots(figsize=(10, 7))
 colores = [ROJO if v > 0 else AZUL for v in top.values]
@@ -541,9 +534,8 @@ plt.close()
 print("\nGrafica guardada: outputs/05_pesos_regresion.png")
 
 
-# ============================================================================
 # 6. CONCLUSIONES Y ANALISIS CUALITATIVO
-# ============================================================================
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 print("\n[6] CONCLUSIONES")
 print("=" * 80)
 
